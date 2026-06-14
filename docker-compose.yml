@@ -1,0 +1,82 @@
+services:
+
+  # Optional isolated infra — only when nothing else uses 5432/4566.
+  # Prefer: reuse existing Postgres + LocalStack (see QUICKSTART.md).
+  postgres:
+    profiles: ["infra"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fitmatch
+      POSTGRES_USER: fitmatch_user
+      POSTGRES_PASSWORD: fitmatch_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fitmatch_user -d fitmatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    profiles: ["infra"]
+    image: localstack/localstack:3.4
+    restart: unless-stopped
+    environment:
+      SERVICES: secretsmanager
+      DEFAULT_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      LOCALSTACK_VOLUME_DIR: /var/lib/localstack
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./localstack/init:/etc/localstack/init/ready.d
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q 'running'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    profiles: ["infra", "app"]
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SECRETS_MANAGER_ENDPOINT: http://localstack:4566
+      DB_SECRET_NAME: fitmatch/db-docker
+      JWT_SECRET_NAME: fitmatch/jwt
+      BFF_SERVICE_TOKEN: fitmatch-bff-token
+
+  bff:
+    profiles: ["infra", "app"]
+    build:
+      context: .
+      dockerfile: bff/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "8081:8081"
+    environment:
+      API_BASE_URL: http://app:8080
+      BFF_SERVICE_TOKEN: fitmatch-bff-token
+
+volumes:
+  postgres_data:
+  localstack_data:

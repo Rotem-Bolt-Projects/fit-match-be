@@ -1,0 +1,3 @@
+rootProject.name = 'FitMatch'
+include 'api'
+include 'bff'
